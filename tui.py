@@ -246,7 +246,10 @@ class BlackjackUI:
             row = L["player_row"] + hand_index * (CARD_H + 2)
             col = L["player_col"]
 
-            label = f"PLAYER {hand_index + 1}" if len(g.player_hands) > 1 else "PLAYER"
+            if len(g.player_hands) > 1:
+                label = "TOTAL:" if hand_index == 0 else f"PLAYER {hand_index + 1}"
+            else:
+                label = "TOTAL:"
             self._addstr_safe(row - 1, col, label, curses.color_pair(8) | curses.A_BOLD)
 
             for i, card in enumerate(hand.cards):

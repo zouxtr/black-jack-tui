@@ -288,9 +288,11 @@ class BlackjackGame:
         d = self.dealer.total
         db = self.dealer.is_bust
         d_bj = self.dealer.is_blackjack
+        is_split = len(self.player_hands) > 1
 
         total_profit = 0
         results = []
+        msg_parts = []
 
         for i, hand in enumerate(self.player_hands):
             hand_bet = self.bet if i == 0 else self.split_bet
@@ -300,58 +302,67 @@ class BlackjackGame:
 
             if p_bj and d_bj:
                 results.append("push")
-                msg_part = f"Hand {i+1}: Push"
+                msg_parts.append("Hand 1: PUSH!" if is_split else "PUSH!")
             elif p_bj and not d_bj:
                 # Blackjack after split pays 1:1 (standard casino rule)
                 win_amount = hand_bet
                 total_profit += win_amount
                 self.bankroll += win_amount
                 results.append("win")
-                msg_part = f"Hand {i+1}: Blackjack!"
+                msg_parts.append("BLACKJACK!" if not is_split else f"Hand {i+1}: BLACKJACK!")
             elif d_bj:
                 total_profit -= hand_bet
                 self.bankroll -= hand_bet
                 results.append("loss")
-                msg_part = f"Hand {i+1}: Loss"
+                msg_parts.append("DEALER HAS BLACKJACK! YOU LOSE." if not is_split else f"Hand {i+1}: LOSE!")
             elif pb:
                 total_profit -= hand_bet
                 self.bankroll -= hand_bet
                 results.append("bust")
-                msg_part = f"Hand {i+1}: Bust"
+                msg_parts.append("YOU BUST! DEALER WINS." if not is_split else f"Hand {i+1}: BUST!")
             elif db:
                 total_profit += hand_bet
                 self.bankroll += hand_bet
                 results.append("win")
-                msg_part = f"Hand {i+1}: Win"
+                msg_parts.append("DEALER BUSTS! YOU WIN!" if not is_split else f"Hand {i+1}: WIN!")
             elif p > d:
                 total_profit += hand_bet
                 self.bankroll += hand_bet
                 results.append("win")
-                msg_part = f"Hand {i+1}: Win ({p} vs {d})"
+                msg_parts.append("YOU WIN!" if not is_split else f"Hand {i+1}: WIN!")
             elif d > p:
                 total_profit -= hand_bet
                 self.bankroll -= hand_bet
                 results.append("loss")
-                msg_part = f"Hand {i+1}: Loss ({d} vs {p})"
+                msg_parts.append("DEALER WINS!" if not is_split else f"Hand {i+1}: LOSE!")
             else:
                 results.append("push")
-                msg_part = f"Hand {i+1}: Push ({p})"
+                msg_parts.append("PUSH!" if not is_split else f"Hand {i+1}: PUSH!")
 
         self.net_profit += total_profit
 
         # Determine overall result
-        if all(r == "push" for r in results):
+        if not is_split:
+            # Single hand: use the specific message part directly
+            self.message = msg_parts[0]
+            if results[0] in ("win", "blackjack"):
+                self.result = "win"
+            elif results[0] in ("loss", "bust"):
+                self.result = "loss"
+            else:
+                self.result = "push"
+        elif all(r == "push" for r in results):
             self.result = "push"
-            self.message = " | ".join(msg_part for msg_part in results)
+            self.message = "PUSH!"
         elif all(r in ("win", "blackjack") for r in results):
             self.result = "win"
-            self.message = " | ".join(msg_part for msg_part in results)
+            self.message = " | ".join(msg_parts)
         elif all(r in ("loss", "bust") for r in results):
             self.result = "loss"
-            self.message = " | ".join(msg_part for msg_part in results)
+            self.message = "YOU LOSE!"
         else:
             self.result = "mixed"
-            self.message = " | ".join(msg_part for msg_part in results)
+            self.message = " | ".join(msg_parts)
 
         self.save()
 
