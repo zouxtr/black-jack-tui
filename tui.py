@@ -123,7 +123,7 @@ class BlackjackUI:
 
         self._compute_layout()
 
-        self._draw_title(w)
+        self._draw_title(h, w)
         self._draw_money_hud(w)
         self._draw_deck(w)
         self._draw_dealer_hand()
@@ -141,10 +141,9 @@ class BlackjackUI:
         except curses.error:
             pass
 
-    def _draw_title(self, w):
+    def _draw_title(self, h, w):
         title = "Black Jack | Fisher-Yates shuffled shoe | Real deck simulation"
-        x = max(0, w // 2 - len(title) // 2)
-        self._addstr_safe(0, x, title, curses.color_pair(3) | curses.A_BOLD)
+        self._addstr_safe(h - 1, 2, title, curses.color_pair(3) | curses.A_DIM)
 
     def _draw_money_hud(self, w):
         g = self.game
