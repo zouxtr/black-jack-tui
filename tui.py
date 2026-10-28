@@ -340,6 +340,9 @@ class BlackjackUI:
         if key in (ord("h"), ord("H")):
             g.player_hit()
             self._queue_hit_animation("player")
+            # Hitting 21 auto-stands → dealer turn needs to start
+            if g.state == "DEALER_TURN":
+                self._start_dealer_turn()
         elif key in (ord("s"), ord("S")):
             g.player_stand()
             self._start_dealer_turn()
