@@ -1,9 +1,11 @@
-"""Blackjack game logic with bankroll persistence and reset.
+"""Blackjack game logic with bankroll persistence, reset, and split pairs.
 
 House rules (fixed, never adapts to the player):
   * Dealer hits on 16 or below, stands on all 17s.
   * Blackjack pays 3:2.
   * Double down allowed only on the first two cards, then exactly one card.
+  * Split allowed on any pair (same value cards), one split per hand, no re-split.
+  * After splitting Aces, each hand receives exactly one more card.
   * Deck is Fisher-Yates shuffled; card order is fixed after shuffle (unrigged).
 """
 
@@ -54,6 +56,11 @@ class Hand:
         non_ace = sum(c.value for c in self.cards if c.rank != "A")
         return non_ace + aces + 10 <= 21
 
+    @property
+    def is_pair(self):
+        """True if the hand has exactly two cards of the same value."""
+        return len(self.cards) == 2 and self.cards[0].value == self.cards[1].value
+
     def __str__(self):
         return " ".join(str(c) for c in self.cards)
 
@@ -67,14 +74,27 @@ class BlackjackGame:
         self.bankroll = bankroll
         self.net_profit = 0
         self.bet = 0
+        self.split_bet = 0  # additional bet placed when splitting
         self.deck = Deck(num_decks=6)
-        self.player = Hand()
+        self.player_hands = [Hand()]  # list of player hands (split creates more)
+        self.active_hand_index = 0
         self.dealer = Hand()
         self.state = "BETTING"  # BETTING | PLAYER_TURN | DEALER_TURN | GAME_OVER
         self.message = ""
-        self.result = None  # 'win' | 'loss' | 'push' | 'blackjack' | 'bust'
+        self.result = None  # 'win' | 'loss' | 'push' | 'blackjack' | 'bust' | 'mixed'
         self.dealer_revealed = False
         self.doubled = False
+        self.split_done = False  # whether a split has occurred this round
+
+    # ------------------------------------------------------------------ compatibility
+    @property
+    def player(self):
+        """Return the currently active player hand (for backwards compatibility)."""
+        return self.player_hands[self.active_hand_index]
+
+    @player.setter
+    def player(self, value):
+        self.player_hands[self.active_hand_index] = value
 
     # ------------------------------------------------------------------ persistence
     def save(self):
@@ -107,13 +127,16 @@ class BlackjackGame:
         self.bankroll = 1000
         self.net_profit = 0
         self.bet = 0
-        self.player.clear()
+        self.split_bet = 0
+        self.player_hands = [Hand()]
+        self.active_hand_index = 0
         self.dealer.clear()
         self.state = "BETTING"
         self.message = ""
         self.result = None
         self.dealer_revealed = False
         self.doubled = False
+        self.split_done = False
         self.deck = Deck(num_decks=6)
         self.save()
 
@@ -122,61 +145,130 @@ class BlackjackGame:
         if amount <= 0 or amount > self.bankroll:
             return False
         self.bet = amount
+        self.split_bet = 0
+        self.player_hands = [Hand()]
+        self.active_hand_index = 0
         self.state = "PLAYER_TURN"
         self._deal_initial()
         self.save()
         return True
 
     def _deal_initial(self):
-        self.player.clear()
         self.dealer.clear()
         self.dealer_revealed = False
         self.doubled = False
+        self.split_done = False
         self.result = None
         self.message = ""
+        self.player_hands = [Hand()]
+        self.active_hand_index = 0
         # Player, dealer, player, dealer.
-        self.player.add(self.deck.draw())
+        self.player_hands[0].add(self.deck.draw())
         self.dealer.add(self.deck.draw())
-        self.player.add(self.deck.draw())
+        self.player_hands[0].add(self.deck.draw())
         self.dealer.add(self.deck.draw())
-        if self.player.is_blackjack or self.dealer.is_blackjack:
+        if self.player_hands[0].is_blackjack or self.dealer.is_blackjack:
             self.dealer_revealed = True
             self._resolve()
+
+    # ---------------------------------------------------------------- split
+    @property
+    def can_split(self):
+        """True if the active hand can be split (pair, first two cards, enough bankroll)."""
+        if self.split_done:
+            return False  # no re-splitting
+        if self.state != "PLAYER_TURN":
+            return False
+        hand = self.player_hands[self.active_hand_index]
+        if len(self.player_hands) > 1:
+            return False  # already split this round
+        if len(hand.cards) != 2:
+            return False
+        if not hand.is_pair:
+            return False
+        # Need enough bankroll to match the bet on the second hand
+        if self.bet * 2 > self.bankroll + self.bet:  # bet already deducted? no, bet is separate
+            return False
+        return self.bankroll >= self.bet
+
+    def split(self):
+        """Split the active hand into two hands, placing a matching bet."""
+        if not self.can_split:
+            return False
+
+        hand = self.player_hands[0]
+        c1, c2 = hand.cards[0], hand.cards[1]
+
+        # Build two new hands
+        hand1 = Hand()
+        hand1.add(c1)
+        hand2 = Hand()
+        hand2.add(c2)
+
+        # Deal one card to each hand
+        hand1.add(self.deck.draw())
+        hand2.add(self.deck.draw())
+
+        self.player_hands = [hand1, hand2]
+        self.active_hand_index = 0
+        self.split_bet = self.bet  # matching bet for second hand
+        self.bankroll -= self.bet  # charge for the additional bet
+        self.split_done = True
+        self.save()
+
+        # If either hand is blackjack after split, resolve immediately
+        self._check_hand_done()
+        return True
+
+    def _check_hand_done(self):
+        """If current hand is done (bust or 21), move to next hand or dealer."""
+        hand = self.player_hands[self.active_hand_index]
+        if hand.is_bust or hand.total == 21:
+            self._next_hand_or_dealer()
+
+    def _next_hand_or_dealer(self):
+        """Advance to the next player hand, or to the dealer turn."""
+        if self.active_hand_index < len(self.player_hands) - 1:
+            self.active_hand_index += 1
+        else:
+            self.state = "DEALER_TURN"
+            self.dealer_revealed = True
 
     # ---------------------------------------------------------------- player actions
     def player_hit(self):
         if self.state != "PLAYER_TURN":
             return
-        self.player.add(self.deck.draw())
-        if self.player.is_blackjack or self.player.is_bust:
-            self.dealer_revealed = True
-            self._resolve()
-        elif self.player.total == 21:
-            self.player_stand()
+        hand = self.player_hands[self.active_hand_index]
+        # After splitting Aces, each hand gets exactly one card (already dealt)
+        if self.split_done and hand.cards[0].rank == "A" and len(hand.cards) >= 2:
+            return
+        hand.add(self.deck.draw())
+        self._check_hand_done()
 
     def player_stand(self):
         if self.state != "PLAYER_TURN":
             return
-        self.state = "DEALER_TURN"
-        self.dealer_revealed = True
-        # Dealer plays via animated hit steps in the TUI loop.
+        self._next_hand_or_dealer()
 
     def player_double(self):
         if self.state != "PLAYER_TURN":
             return
-        if len(self.player.cards) != 2:
-            return  # only on first two cards
-        if self.bet * 2 > self.bankroll:
+        hand = self.player_hands[self.active_hand_index]
+        if len(hand.cards) != 2:
+            return  # only on first two cards of the hand
+        total_bet = self.bet + (self.split_bet if self.active_hand_index == 1 else 0)
+        if total_bet * 2 > self.bankroll:
             return
-        self.bet *= 2
-        self.doubled = True
-        self.player.add(self.deck.draw())
-        self.dealer_revealed = True
-        if self.player.is_bust:
-            self._resolve()
+        # Double the bet for this hand only
+        if self.active_hand_index == 0:
+            self.bet *= 2
         else:
-            self.state = "DEALER_TURN"
-            # Dealer plays via animated hit steps in the TUI loop.
+            self.split_bet *= 2
+        self.bankroll -= total_bet  # charge the additional amount
+        self.doubled = True
+        hand.add(self.deck.draw())
+        self.dealer_revealed = True
+        self._check_hand_done()
 
     # ---------------------------------------------------------------- dealer turn
     def dealer_hit_step(self):
@@ -191,59 +283,88 @@ class BlackjackGame:
 
     # ----------------------------------------------------------------- settlement
     def _resolve(self):
+        """Resolve all player hands against the dealer."""
         self.state = "GAME_OVER"
-        p = self.player.total
         d = self.dealer.total
-        pb = self.player.is_bust
         db = self.dealer.is_bust
-        p_bj = self.player.is_blackjack
         d_bj = self.dealer.is_blackjack
 
-        if p_bj and d_bj:
+        total_profit = 0
+        results = []
+
+        for i, hand in enumerate(self.player_hands):
+            hand_bet = self.bet if i == 0 else self.split_bet
+            p = hand.total
+            pb = hand.is_bust
+            p_bj = hand.is_blackjack
+
+            if p_bj and d_bj:
+                results.append("push")
+                msg_part = f"Hand {i+1}: Push"
+            elif p_bj and not d_bj:
+                # Blackjack after split pays 1:1 (standard casino rule)
+                win_amount = hand_bet
+                total_profit += win_amount
+                self.bankroll += win_amount
+                results.append("win")
+                msg_part = f"Hand {i+1}: Blackjack!"
+            elif d_bj:
+                total_profit -= hand_bet
+                self.bankroll -= hand_bet
+                results.append("loss")
+                msg_part = f"Hand {i+1}: Loss"
+            elif pb:
+                total_profit -= hand_bet
+                self.bankroll -= hand_bet
+                results.append("bust")
+                msg_part = f"Hand {i+1}: Bust"
+            elif db:
+                total_profit += hand_bet
+                self.bankroll += hand_bet
+                results.append("win")
+                msg_part = f"Hand {i+1}: Win"
+            elif p > d:
+                total_profit += hand_bet
+                self.bankroll += hand_bet
+                results.append("win")
+                msg_part = f"Hand {i+1}: Win ({p} vs {d})"
+            elif d > p:
+                total_profit -= hand_bet
+                self.bankroll -= hand_bet
+                results.append("loss")
+                msg_part = f"Hand {i+1}: Loss ({d} vs {p})"
+            else:
+                results.append("push")
+                msg_part = f"Hand {i+1}: Push ({p})"
+
+        self.net_profit += total_profit
+
+        # Determine overall result
+        if all(r == "push" for r in results):
             self.result = "push"
-            self.message = "Both have blackjack. Push."
-        elif p_bj:
-            self.result = "blackjack"
-            self.message = "Blackjack! You win 3:2."
-            self.bankroll += self.bet * self.BLACKJACK_PAYOUT_NUM // self.BLACKJACK_PAYOUT_DEN
-            self.net_profit += self.bet * self.BLACKJACK_PAYOUT_NUM // self.BLACKJACK_PAYOUT_DEN
-        elif d_bj:
-            self.result = "loss"
-            self.message = "Dealer has blackjack. You lose."
-            self.bankroll -= self.bet
-            self.net_profit -= self.bet
-        elif pb:
-            self.result = "bust"
-            self.message = "You bust. Dealer wins."
-            self.bankroll -= self.bet
-            self.net_profit -= self.bet
-        elif db:
+            self.message = " | ".join(msg_part for msg_part in results)
+        elif all(r in ("win", "blackjack") for r in results):
             self.result = "win"
-            self.message = "Dealer busts. You win!"
-            self.bankroll += self.bet
-            self.net_profit += self.bet
-        elif p > d:
-            self.result = "win"
-            self.message = f"You win ({p} vs {d})!"
-            self.bankroll += self.bet
-            self.net_profit += self.bet
-        elif d > p:
+            self.message = " | ".join(msg_part for msg_part in results)
+        elif all(r in ("loss", "bust") for r in results):
             self.result = "loss"
-            self.message = f"Dealer wins ({d} vs {p})."
-            self.bankroll -= self.bet
-            self.net_profit -= self.bet
+            self.message = " | ".join(msg_part for msg_part in results)
         else:
-            self.result = "push"
-            self.message = f"Push ({p} vs {d})."
+            self.result = "mixed"
+            self.message = " | ".join(msg_part for msg_part in results)
+
         self.save()
 
     def next_hand(self):
-        self.player.clear()
+        self.player_hands = [Hand()]
+        self.active_hand_index = 0
         self.dealer.clear()
         self.state = "BETTING"
         self.message = ""
         self.result = None
         self.dealer_revealed = False
         self.doubled = False
+        self.split_bet = 0
+        self.split_done = False
         self.bet = 0
         self.save()

@@ -1,8 +1,8 @@
 """Enhanced curses TUI for Blackjack with animated card dealing and ASCII cards.
 
 Layout:
-  * Deck sits on the LEFT side, vertically centered between dealer and player.
-  * Dealer hand at top, player hand at bottom.
+  * Deck sits on the LEFT side.
+  * Dealer hand at top, player hand(s) below.
   * Money HUD across the top.
 """
 
@@ -97,19 +97,19 @@ class BlackjackUI:
             "deck_col": 2,
             "dealer_row": 6,
             "dealer_col": 10,        # start right of the deck
-            "player_row": 16,
+            "player_row": 15,        # first player hand row
             "player_col": 10,        # start right of the deck
         }
 
-    def _card_pos(self, hand_type, index):
+    def _card_pos(self, hand_type, card_index, hand_index=0):
         """Target row,col where a card rests in a hand."""
         L = self.layout
         if hand_type == "dealer":
             row = L["dealer_row"]
-            col = L["dealer_col"] + index * (CARD_W + 1)
+            col = L["dealer_col"] + card_index * (CARD_W + 1)
         else:
-            row = L["player_row"]
-            col = L["player_col"] + index * (CARD_W + 1)
+            row = L["player_row"] + hand_index * (CARD_H + 2)
+            col = L["player_col"] + card_index * (CARD_W + 1)
         return row, col
 
     # --------------------------------------------------------------- drawing
@@ -126,8 +126,8 @@ class BlackjackUI:
         self._draw_title(w)
         self._draw_money_hud(w)
         self._draw_deck(w)
-        self._draw_hand("dealer", self.game.dealer_revealed)
-        self._draw_hand("player", True)
+        self._draw_dealer_hand()
+        self._draw_player_hands()
         self._draw_message(w)
         self._draw_controls(w)
         self._draw_bet_input(w)
@@ -183,27 +183,27 @@ class BlackjackUI:
         for i, line in enumerate(back_lines):
             self._addstr_safe(dr + i, dc, line, curses.color_pair(2) | curses.A_DIM)
 
-    def _draw_hand(self, hand_type, reveal_all):
+    def _is_animating(self, card):
+        """True if a card object is currently being animated."""
+        for a in self.anim.animations:
+            if a.card is card:
+                return True
+        return False
+
+    def _draw_dealer_hand(self):
         g = self.game
-        hand = g.dealer if hand_type == "dealer" else g.player
-        label = "DEALER" if hand_type == "dealer" else "PLAYER"
-        L = self.layout
+        hand = g.dealer
+        row = self.layout["dealer_row"]
+        col = self.layout["dealer_col"]
 
-        row = L["dealer_row"] if hand_type == "dealer" else L["player_row"]
-        col = L["dealer_col"] if hand_type == "dealer" else L["player_col"]
+        self._addstr_safe(row - 1, col, "DEALER", curses.color_pair(7) | curses.A_BOLD)
 
-        label_attr = curses.color_pair(7) if hand_type == "dealer" else curses.color_pair(8)
-        self._addstr_safe(row - 1, col, label, label_attr | curses.A_BOLD)
-
-        animating = self.anim.animated_indices()
-
-        # Draw static cards (not currently animating)
         for i, card in enumerate(hand.cards):
-            if (hand_type, i) in animating:
+            if self._is_animating(card):
                 continue
-            hidden = (not reveal_all and hand_type == "dealer" and i == len(hand.cards) - 1)
+            hidden = (not g.dealer_revealed and i == len(hand.cards) - 1)
             lines = render_card(card, hidden=hidden)
-            r, c = self._card_pos(hand_type, i)
+            r, c = self._card_pos("dealer", i)
             if hidden:
                 attr = curses.A_DIM
             elif is_red_suit(card.suit):
@@ -213,9 +213,8 @@ class BlackjackUI:
             for li, line in enumerate(lines):
                 self._addstr_safe(r + li, c, line, attr)
 
-        # Draw animated cards at their current interpolated position
         for a in self.anim.animations:
-            if a.hand_type != hand_type:
+            if a.hand_type != "dealer":
                 continue
             lines = a.render()
             r, c = a.current_row, a.current_col
@@ -228,9 +227,8 @@ class BlackjackUI:
             for li, line in enumerate(lines):
                 self._addstr_safe(r + li, c, line, attr)
 
-        # Total line
         total_row = row + CARD_H + 1
-        if reveal_all or hand_type == "player":
+        if g.dealer_revealed:
             tot = f"Total: {hand.total}"
             if hand.is_blackjack:
                 tot += "  BLACKJACK!"
@@ -240,9 +238,42 @@ class BlackjackUI:
         else:
             self._addstr_safe(total_row, col, "Total: ?", curses.A_DIM)
 
+    def _draw_player_hands(self):
+        g = self.game
+        L = self.layout
+
+        for hand_index, hand in enumerate(g.player_hands):
+            row = L["player_row"] + hand_index * (CARD_H + 2)
+            col = L["player_col"]
+
+            label = f"PLAYER {hand_index + 1}" if len(g.player_hands) > 1 else "PLAYER"
+            self._addstr_safe(row - 1, col, label, curses.color_pair(8) | curses.A_BOLD)
+
+            for i, card in enumerate(hand.cards):
+                if self._is_animating(card):
+                    continue
+                lines = render_card(card, hidden=False)
+                r, c = self._card_pos("player", i, hand_index)
+                if is_red_suit(card.suit):
+                    attr = curses.color_pair(1)
+                else:
+                    attr = curses.color_pair(2)
+                for li, line in enumerate(lines):
+                    self._addstr_safe(r + li, c, line, attr)
+
+            total_row = row + CARD_H + 1
+            tot = f"Total: {hand.total}"
+            if hand.is_blackjack:
+                tot += "  BLACKJACK!"
+            elif hand.is_bust:
+                tot += "  BUST"
+            self._addstr_safe(total_row, col, tot, curses.A_BOLD)
+
     def _draw_message(self, w):
         g = self.game
-        y = self.layout["player_row"] + CARD_H + 3
+        # Place message below the last player hand total
+        last_hand_row = self.layout["player_row"] + (len(g.player_hands) - 1) * (CARD_H + 2)
+        y = last_hand_row + CARD_H + 3
         msg = g.message
         if not msg:
             if g.state == "BETTING":
@@ -261,11 +292,14 @@ class BlackjackUI:
             attr = curses.color_pair(5) | curses.A_BOLD
         elif g.result == "push":
             attr = curses.color_pair(6) | curses.A_BOLD
+        elif g.result == "mixed":
+            attr = curses.color_pair(3) | curses.A_BOLD
         self._addstr_safe(y, 2, msg[: w - 4], attr)
 
     def _draw_controls(self, w):
         g = self.game
-        y = self.layout["player_row"] + CARD_H + 5
+        last_hand_row = self.layout["player_row"] + (len(g.player_hands) - 1) * (CARD_H + 2)
+        y = last_hand_row + CARD_H + 5
 
         if self.reset_confirm:
             self._addstr_safe(
@@ -283,8 +317,11 @@ class BlackjackUI:
             )
         elif g.state == "PLAYER_TURN":
             opts = ["[H] Hit", "[S] Stand"]
-            if len(g.player.cards) == 2 and g.bet * 2 <= g.bankroll:
+            hand = g.player_hands[g.active_hand_index]
+            if len(hand.cards) == 2 and g.bet * 2 <= g.bankroll:
                 opts.append("[D] Double")
+            if g.can_split:
+                opts.append("[Y] Split")
             opts.append("[R] Reset   [Q] Quit")
             self._addstr_safe(y, 2, "   ".join(opts), curses.A_BOLD)
         elif g.state == "GAME_OVER":
@@ -297,7 +334,8 @@ class BlackjackUI:
     def _draw_bet_input(self, w):
         if self.game.state != "BETTING" or self.reset_confirm:
             return
-        y = self.layout["player_row"] + CARD_H + 7
+        last_hand_row = self.layout["player_row"] + (len(self.game.player_hands) - 1) * (CARD_H + 2)
+        y = last_hand_row + CARD_H + 7
         prompt = f"Bet: ${self.bet_buf}"
         self._addstr_safe(y, 2, prompt, curses.color_pair(3) | curses.A_BOLD)
         cur_x = 2 + len(prompt)
@@ -345,7 +383,6 @@ class BlackjackUI:
         if key in (ord("h"), ord("H")):
             g.player_hit()
             self._queue_hit_animation("player")
-            # Hitting 21 auto-stands → dealer turn needs to start
             if g.state == "DEALER_TURN":
                 self._start_dealer_turn()
         elif key in (ord("s"), ord("S")):
@@ -356,6 +393,10 @@ class BlackjackUI:
             self._queue_hit_animation("player")
             if g.state == "DEALER_TURN":
                 self._start_dealer_turn()
+        elif key in (ord("y"), ord("Y")):
+            if g.can_split:
+                g.split()
+                self._start_split_animations()
         elif key in (ord("r"), ord("R")):
             self.reset_confirm = True
         return True
@@ -368,10 +409,10 @@ class BlackjackUI:
         deck_r = L["deck_row"] + CARD_H // 2
         deck_c = L["deck_col"] + CARD_W // 2
 
-        # Player card 0
+        # Player card 0 -> player hand 0, card 0
         self.anim.add(CardAnimation(
-            g.player.cards[0], deck_r, deck_c,
-            *self._card_pos("player", 0), hidden=False,
+            g.player_hands[0].cards[0], deck_r, deck_c,
+            *self._card_pos("player", 0, 0), hidden=False,
             hand_type="player", hand_index=0,
         ))
         # Dealer card 0 (face up)
@@ -380,35 +421,60 @@ class BlackjackUI:
             *self._card_pos("dealer", 0), hidden=False,
             hand_type="dealer", hand_index=0,
         ))
-        # Player card 1
+        # Player card 1 -> player hand 0, card 1
         self.anim.add(CardAnimation(
-            g.player.cards[1], deck_r, deck_c,
-            *self._card_pos("player", 1), hidden=False,
-            hand_type="player", hand_index=1,
+            g.player_hands[0].cards[1], deck_r, deck_c,
+            *self._card_pos("player", 1, 0), hidden=False,
+            hand_type="player", hand_index=0,
         ))
         # Dealer card 1 (face down during flight)
         self.anim.add(CardAnimation(
             g.dealer.cards[1], deck_r, deck_c,
             *self._card_pos("dealer", 1), hidden=True,
-            hand_type="dealer", hand_index=1,
+            hand_type="dealer", hand_index=0,
         ))
 
-    def _queue_hit_animation(self, hand_type):
-        """Fly the most recently added card to its hand slot."""
+    def _start_split_animations(self):
+        """Fly the newly dealt split cards to their hand positions."""
         g = self.game
-        hand = g.player if hand_type == "player" else g.dealer
-        index = len(hand.cards) - 1
         L = self.layout
         deck_r = L["deck_row"] + CARD_H // 2
         deck_c = L["deck_col"] + CARD_W // 2
 
-        hidden = (hand_type == "dealer" and not g.dealer_revealed
-                  and index == len(hand.cards) - 1)
+        # Hand 0's new card (index 1) goes to hand 0 row
+        self.anim.add(CardAnimation(
+            g.player_hands[0].cards[1], deck_r, deck_c,
+            *self._card_pos("player", 1, 0), hidden=False,
+            hand_type="player", hand_index=0,
+        ))
+        # Hand 1's two cards go to hand 1 row
+        for ci, card in enumerate(g.player_hands[1].cards):
+            self.anim.add(CardAnimation(
+                card, deck_r, deck_c,
+                *self._card_pos("player", ci, 1), hidden=False,
+                hand_type="player", hand_index=1,
+            ))
+
+    def _queue_hit_animation(self, hand_type):
+        """Fly the most recently added card to its hand slot."""
+        g = self.game
+        L = self.layout
+        deck_r = L["deck_row"] + CARD_H // 2
+        deck_c = L["deck_col"] + CARD_W // 2
+
+        if hand_type == "dealer":
+            hand = g.dealer
+            hand_index = 0
+        else:
+            hand = g.player_hands[g.active_hand_index]
+            hand_index = g.active_hand_index
+
+        card_index = len(hand.cards) - 1
 
         self.anim.add(CardAnimation(
-            hand.cards[index], deck_r, deck_c,
-            *self._card_pos(hand_type, index), hidden=hidden,
-            hand_type=hand_type, hand_index=index,
+            hand.cards[card_index], deck_r, deck_c,
+            *self._card_pos(hand_type, card_index, hand_index), hidden=False,
+            hand_type=hand_type, hand_index=hand_index,
         ))
 
     def _start_dealer_turn(self):
