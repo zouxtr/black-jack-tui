@@ -35,6 +35,26 @@ cd /home/zouxtr/Documents/projekts/game_tui
 python3 main.py
 ```
 
+### One-line install (Linux) — run `black_jack_tui` from anywhere
+
+```bash
+curl -sSL https://raw.githubusercontent.com/zouxtr/black-jack-tui/main/install.sh | bash
+```
+
+This clones the repo to `~/.local/share/black-jack-tui` and creates a `black_jack_tui` command in `~/.local/bin`. After installing, just type:
+
+```bash
+black_jack_tui
+```
+
+If the command is not found, add `~/.local/bin` to your PATH:
+
+```bash
+export PATH="$PATH:$HOME/.local/bin"
+```
+
+Add that line to your `~/.bashrc` or `~/.zshrc` to make it permanent.
+
 ### Windows
 
 `curses` is **not** part of the Python standard library on Windows, so you need to install the `windows-curses` package first:
