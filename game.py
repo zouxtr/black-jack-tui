@@ -103,6 +103,7 @@ class BlackjackGame:
     # ------------------------------------------------------------------ reset
     def reset(self):
         """Reset bankroll to $1,000 and clear the win/loss counter."""
+        self.starting_bankroll = 1000
         self.bankroll = 1000
         self.net_profit = 0
         self.bet = 0

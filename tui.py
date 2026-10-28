@@ -67,7 +67,7 @@ class BlackjackUI:
                 if key in (ord("y"), ord("Y")):
                     self.game.reset()
                     self.reset_confirm = False
-                    self.game.message = f"Account reset to ${self.game.starting_bankroll}."
+                    self.game.message = "Account reset to $1,000."
                 elif key in (ord("n"), ord("N"), 27):  # ESC
                     self.reset_confirm = False
                     self.game.message = "Reset cancelled."
@@ -270,7 +270,7 @@ class BlackjackUI:
         if self.reset_confirm:
             self._addstr_safe(
                 y, 2,
-                f"RESET account to ${g.starting_bankroll}?  (Y)es  (N)o",
+                "RESET account to $1,000?  (Y)es  (N)o",
                 curses.color_pair(5) | curses.A_BOLD,
             )
             return
