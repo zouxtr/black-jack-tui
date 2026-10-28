@@ -142,14 +142,9 @@ class BlackjackUI:
             pass
 
     def _draw_title(self, w):
-        title = "BLACKJACK"
+        title = "Black Jack | Fisher-Yates shuffled shoe | Real deck simulation"
         x = max(0, w // 2 - len(title) // 2)
         self._addstr_safe(0, x, title, curses.color_pair(3) | curses.A_BOLD)
-        self._addstr_safe(
-            1, 2,
-            "Real deck simulation  |  Fisher-Yates shuffled shoe  |  Not rigged",
-            curses.A_DIM,
-        )
 
     def _draw_money_hud(self, w):
         g = self.game
