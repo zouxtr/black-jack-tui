@@ -143,7 +143,7 @@ class BlackjackUI:
 
     def _draw_title(self, h, w):
         title = "Black Jack | Fisher-Yates shuffled shoe | Real deck simulation"
-        self._addstr_safe(h - 1, 2, title, curses.color_pair(3) | curses.A_DIM)
+        self._addstr_safe(0, 2, title, curses.color_pair(3) | curses.A_DIM)
 
     def _draw_money_hud(self, w):
         g = self.game
