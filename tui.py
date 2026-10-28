@@ -167,6 +167,11 @@ class BlackjackUI:
         shoe_x = bet_x + len(bet_str) + 4
         self._addstr_safe(3, shoe_x, shoe_str, curses.A_DIM)
 
+        net_str = f"Net: ${g.net_profit:+d}"
+        net_attr = curses.color_pair(4) if g.net_profit >= 0 else curses.color_pair(5)
+        net_x = shoe_x + len(shoe_str) + 4
+        self._addstr_safe(3, net_x, net_str, net_attr | curses.A_BOLD)
+
         sep_len = min(58, w - 4)
         self._addstr_safe(4, 2, "\u2500" * sep_len, curses.A_DIM)
 

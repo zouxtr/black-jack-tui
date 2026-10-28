@@ -65,6 +65,7 @@ class BlackjackGame:
     def __init__(self, bankroll=1000):
         self.starting_bankroll = bankroll
         self.bankroll = bankroll
+        self.net_profit = 0
         self.bet = 0
         self.deck = Deck(num_decks=6)
         self.player = Hand()
@@ -77,7 +78,11 @@ class BlackjackGame:
 
     # ------------------------------------------------------------------ persistence
     def save(self):
-        data = {"bankroll": self.bankroll, "starting_bankroll": self.starting_bankroll}
+        data = {
+            "bankroll": self.bankroll,
+            "net_profit": self.net_profit,
+            "starting_bankroll": self.starting_bankroll,
+        }
         try:
             with open(SAVE_FILE, "w") as f:
                 json.dump(data, f)
@@ -89,14 +94,17 @@ class BlackjackGame:
         try:
             with open(SAVE_FILE, "r") as f:
                 data = json.load(f)
-            return cls(bankroll=data.get("bankroll", 1000))
+            game = cls(bankroll=data.get("bankroll", 1000))
+            game.net_profit = data.get("net_profit", 0)
+            return game
         except (OSError, json.JSONDecodeError, ValueError):
             return cls(bankroll=1000)
 
     # ------------------------------------------------------------------ reset
     def reset(self):
-        """Reset bankroll to starting amount and start a fresh shoe."""
-        self.bankroll = self.starting_bankroll
+        """Reset bankroll to $1,000 and clear the win/loss counter."""
+        self.bankroll = 1000
+        self.net_profit = 0
         self.bet = 0
         self.player.clear()
         self.dealer.clear()
@@ -197,26 +205,32 @@ class BlackjackGame:
             self.result = "blackjack"
             self.message = "Blackjack! You win 3:2."
             self.bankroll += self.bet * self.BLACKJACK_PAYOUT_NUM // self.BLACKJACK_PAYOUT_DEN
+            self.net_profit += self.bet * self.BLACKJACK_PAYOUT_NUM // self.BLACKJACK_PAYOUT_DEN
         elif d_bj:
             self.result = "loss"
             self.message = "Dealer has blackjack. You lose."
             self.bankroll -= self.bet
+            self.net_profit -= self.bet
         elif pb:
             self.result = "bust"
             self.message = "You bust. Dealer wins."
             self.bankroll -= self.bet
+            self.net_profit -= self.bet
         elif db:
             self.result = "win"
             self.message = "Dealer busts. You win!"
             self.bankroll += self.bet
+            self.net_profit += self.bet
         elif p > d:
             self.result = "win"
             self.message = f"You win ({p} vs {d})!"
             self.bankroll += self.bet
+            self.net_profit += self.bet
         elif d > p:
             self.result = "loss"
             self.message = f"Dealer wins ({d} vs {p})."
             self.bankroll -= self.bet
+            self.net_profit -= self.bet
         else:
             self.result = "push"
             self.message = f"Push ({p} vs {d})."
