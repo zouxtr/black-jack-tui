@@ -28,10 +28,30 @@ and ASCII art cards. Built with Python 3 + `curses` (standard library — nothin
 
 ## Run
 
+### Linux / macOS
+
 ```bash
 cd /home/zouxtr/Documents/projekts/game_tui
 python3 main.py
 ```
+
+### Windows
+
+`curses` is **not** part of the Python standard library on Windows, so you need to install the `windows-curses` package first:
+
+```powershell
+# 1. Clone the repo
+git clone https://github.com/zouxtr/black-jack-tui.git
+cd black-jack-tui
+
+# 2. Install the Windows curses package
+pip install windows-curses
+
+# 3. Run the game
+python main.py
+```
+
+Alternatively, you can run it in [WSL](https://learn.microsoft.com/en-us/windows/wsl/) (Windows Subsystem for Linux), where it works out of the box with no extra install.
 
 ## Controls
 
@@ -51,6 +71,6 @@ python3 main.py
 ## Requirements
 
 * Python 3.10+
-* `curses` (included in Python standard library on Linux/macOS)
+* `curses` (included in Python standard library on Linux/macOS; install `windows-curses` on Windows)
 
-No `pip install` needed.
+No other `pip install` needed.
